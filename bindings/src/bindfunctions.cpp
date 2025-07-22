@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,6 +17,8 @@
 
 #include "bind_string_property_definitions.h"
 #include "bindfunctions.hpp"
+#include "gst-nvdscustomevent.h"
+#include "nvds_obj_encode.h"
 
 namespace py = pybind11;
 using namespace std;
@@ -272,7 +274,9 @@ namespace pydeepstream {
               pydsdoc::methodsDoc::nvds_copy_obj_meta_list1);
 
         m.def("nvds_get_user_meta_type",
-              &nvds_get_user_meta_type,
+              [](const char* meta_descriptor) {
+                  return g_quark_from_string((gchar*)meta_descriptor) + NVDS_START_USER_META;
+              },
               "meta_descriptor"_a,
               pydsdoc::methodsDoc::nvds_get_user_meta_type1);
 
@@ -304,7 +308,7 @@ namespace pydeepstream {
 
         /**
          * Returns the frame in the numpy format
-         * @param[in] addreess of the buffer
+         * @param[in] address of the buffer
          * @param[in] batch_id
          */
         m.def("get_nvds_buf_surface",
@@ -315,29 +319,29 @@ namespace pydeepstream {
                   auto *inputnvsurface = reinterpret_cast<NvBufSurface *>(inmap.data);
                   gst_buffer_unmap(buffer, &inmap);
 
-                  if (inputnvsurface->surfaceList->colorFormat !=
-                      NVBUF_COLOR_FORMAT_RGBA) {
+                  if (inputnvsurface->surfaceList->colorFormat != NVBUF_COLOR_FORMAT_RGBA &&
+                      inputnvsurface->surfaceList->colorFormat != NVBUF_COLOR_FORMAT_RGB ) {
                       throw std::runtime_error(
-                              "get_nvds_buf_Surface: Currently we only support RGBA color Format");
+                      "get_nvds_buf_Surface: Currently we only support RGBA/RGB color Format");
                   }
 
-                  int channels = 4;
+                  int channels = inputnvsurface->surfaceList->colorFormat != NVBUF_COLOR_FORMAT_RGB ? 4:3;
                   /* use const reference here so input_surface is not altered
                      during mapping and syncing for CPU */
                   const NvBufSurfaceParams &input_surface = inputnvsurface->surfaceList[batchID];
-#ifdef __aarch64__
+#if defined __aarch64__ && !defined IS_SBSA
                   /* Map the buffer if it has not been mapped already, before syncing the
                      mapped buffer to CPU.*/
                   if (nullptr == input_surface.mappedAddr.addr[0]) {
                       int ret = NvBufSurfaceMap(inputnvsurface, batchID, -1,
                                                 NVBUF_MAP_READ_WRITE);
                       if (ret < 0) {
-                          cout << "get_nvds_buf_Surface: Failed to map "
+                          cout << "get_nvds_buf_surface: Failed to map "
                                   << "buffer to CPU" << endl;
                       }
                   }
                   if (NvBufSurfaceSyncForCpu(inputnvsurface, batchID, -1) != 0) {
-                      cout << "get_nvds_buf_Surface: Failed to sync "
+                      cout << "get_nvds_buf_surface: Failed to sync "
                               << "buffer to CPU " << endl;
                   }
 
@@ -384,19 +388,19 @@ namespace pydeepstream {
                   auto *inputnvsurface = reinterpret_cast<NvBufSurface *>(inmap.data);
                   gst_buffer_unmap(buffer, &inmap);
 
-                  if (inputnvsurface->surfaceList->colorFormat !=
-                      NVBUF_COLOR_FORMAT_RGBA) {
+                  if (inputnvsurface->surfaceList->colorFormat != NVBUF_COLOR_FORMAT_RGBA &&
+                      inputnvsurface->surfaceList->colorFormat != NVBUF_COLOR_FORMAT_RGB) {
                       throw std::runtime_error(
-                              "get_nvds_buf_Surface: Currently we only support RGBA color Format");
+                              "get_nvds_buf_surface_gpu: Currently we only support RGB/RGBA color Format");
                   }
 
-#ifdef __aarch64__
+#if defined __aarch64__ && !defined IS_SBSA
                   /* Map the buffer if it has not been mapped already, otherwise sync the
                      mapped buffer to CPU.*/
                   throw std::runtime_error(
-                          "get_nvds_buf_Surface: Currently we only support x86");
+                          "get_nvds_buf_surface_gpu: Currently we only support x86");
 #else
-                  int channels = 4;
+                  int channels = inputnvsurface->surfaceList->colorFormat != NVBUF_COLOR_FORMAT_RGB ? 4:3;
                   int height = inputnvsurface->surfaceList[batchID].height;
                   int width = inputnvsurface->surfaceList[batchID].width;
                   int pitch = inputnvsurface->surfaceList[batchID].pitch;
@@ -417,7 +421,39 @@ namespace pydeepstream {
               },
               "gst_buffer"_a, "batchID"_a,
               py::return_value_policy::reference,
-              pydsdoc::methodsDoc::get_nvds_buf_surface);
+              pydsdoc::methodsDoc::get_nvds_buf_surface_gpu);
+
+
+        /**
+         * Unmaps the NvBufSurface of the frame
+         * @param[in] address of the buffer
+         * @param[in] batch_id
+         */
+        m.def("unmap_nvds_buf_surface",
+              [](size_t gst_buffer, int batchID) {
+                  auto *buffer = reinterpret_cast<GstBuffer *>(gst_buffer);
+                  GstMapInfo inmap;
+                  gst_buffer_map(buffer, &inmap, GST_MAP_READ);
+                  auto *inputnvsurface = reinterpret_cast<NvBufSurface *>(inmap.data);
+                  gst_buffer_unmap(buffer, &inmap);
+
+                  /* use const reference here so input_surface is not altered
+                     during mapping and syncing for CPU */
+                  const NvBufSurfaceParams &input_surface = inputnvsurface->surfaceList[batchID];
+                  /* Map the buffer if it has not been mapped already, before syncing the
+                     mapped buffer to CPU.*/
+                  if (nullptr != input_surface.mappedAddr.addr[0]) {
+                      int ret = NvBufSurfaceUnMap(inputnvsurface, batchID, -1);
+                      if (ret < 0) {
+                          cout << "get_nvds_buf_Surface: Failed to unmap "
+                                  << "buffer" << endl;
+                      }
+                  }
+              },
+              "gst_buffer"_a,
+              "batchID"_a,
+              pydsdoc::methodsDoc::unmap_nvds_buf_surface
+        );
 
         //FIXME: Find a better way of doing this
         /**
@@ -765,5 +801,102 @@ namespace pydeepstream {
               },
               pydsdoc::methodsDoc::gst_element_send_nvevent_new_stream_reset);
 
-    }
+        m.def("gst_element_send_nvevent_interval_update",
+            [](size_t gst_element, char* stream_id, int interval) {
+                bool ret = false;
+                auto *element = reinterpret_cast<GstElement *>(gst_element);
+                auto *event = gst_nvevent_infer_interval_update(stream_id, interval);
+                Py_BEGIN_ALLOW_THREADS;
+                ret = gst_element_send_event(element, event);
+                Py_END_ALLOW_THREADS;
+                return ret;
+            },
+            pydsdoc::methodsDoc::gst_element_send_nvevent_interval_update);
+
+        m.def("configure_source_for_ntp_sync",
+            [](size_t src_elem) {
+                  auto *element = reinterpret_cast<GstElement *>(src_elem);
+                  configure_source_for_ntp_sync(element);
+                  return;
+              },
+              "src_elem"_a,
+              pydsdoc::methodsDoc::configure_source_for_ntp_sync);
+
+        m.def("nvds_measure_buffer_latency",
+            [](size_t gst_buffer) {
+                  int num_sources_in_batch = 0;
+                  if(nvds_enable_latency_measurement)
+                  {
+                        auto *buffer = reinterpret_cast<GstBuffer *>(gst_buffer);
+                        NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta (buffer);
+                        if (!batch_meta) {
+                            cout <<"Batch meta not found for buffer "<< buffer << endl;
+                            return num_sources_in_batch;
+                        }
+
+                        nvds_acquire_meta_lock (batch_meta);
+                        NvDsFrameLatencyInfo* latency_info = (NvDsFrameLatencyInfo*)g_malloc0(
+                        sizeof(NvDsFrameLatencyInfo) * batch_meta->max_frames_in_batch);
+                        nvds_release_meta_lock (batch_meta);
+                        if(latency_info){
+                              num_sources_in_batch = nvds_measure_buffer_latency(buffer, latency_info);
+                              cout << "************BATCH-NUM = "<< latency_info[0].frame_num << "**************" << endl;
+                              for(int i = 0; i < num_sources_in_batch; i++)
+                              {
+                                    cout << "Source id = " << latency_info[i].source_id <<
+                                            " Frame_num = " << latency_info[i].frame_num << 
+                                            " Frame latency = " << latency_info[i].latency << " (ms) " << endl;
+                              }
+                              g_free(latency_info);
+                              latency_info = NULL;
+                        }
+                  }
+                  return num_sources_in_batch;
+              },
+              "gst_buffer"_a, py::return_value_policy::reference,
+              pydsdoc::methodsDoc::nvds_measure_buffer_latency);
+
+        m.def("nvds_obj_enc_create_context",
+            [](int gpu_id) -> size_t {
+                auto handle = nvds_obj_enc_create_context(gpu_id);
+                return reinterpret_cast<size_t>(handle);
+            }, py::return_value_policy::reference,
+            pydsdoc::methodsDoc::nvds_obj_enc_create_context);
+
+        m.def("nvds_obj_enc_process",
+            [](size_t ctx, NvDsObjEncUsrArgs *args,
+                size_t gst_buffer, NvDsObjectMeta *obj_meta, NvDsFrameMeta *frame_meta) -> bool {
+                auto *buffer = reinterpret_cast<GstBuffer *>(gst_buffer);
+                auto *handle = reinterpret_cast<NvDsObjEncCtxHandle>(ctx);
+                if (buffer == nullptr || handle == nullptr) {
+                    std::cout << "buffer: " << buffer << " handle: " << handle << std::endl;
+                    return false;
+                }
+
+                GstMapInfo inmap;
+                gst_buffer_map(buffer, &inmap, GST_MAP_READ);
+                auto *inputnvsurface = reinterpret_cast<NvBufSurface *>(inmap.data);
+                gst_buffer_unmap(buffer, &inmap);
+
+                return nvds_obj_enc_process(handle, args, inputnvsurface, obj_meta, frame_meta);
+            }, "ctx"_a, "args"_a, "gst_buffer"_a, "obj_meta"_a, "frame_meta"_a,
+            py::return_value_policy::reference,
+            pydsdoc::methodsDoc::nvds_obj_enc_process);
+
+        m.def("nvds_obj_enc_finish",
+            [](size_t ctx) {
+                auto *handle = reinterpret_cast<NvDsObjEncCtxHandle>(ctx);
+                if (handle != nullptr) {
+                    nvds_obj_enc_finish(handle);
+                }
+            }, "ctx"_a, pydsdoc::methodsDoc::nvds_obj_enc_finish);
+
+        m.def("nvds_obj_enc_destroy_context",
+            [](size_t ctx) {
+                auto *handle = reinterpret_cast<NvDsObjEncCtxHandle>(ctx);
+                if (handle != nullptr) {
+                    nvds_obj_enc_destroy_context(handle);
+                }
+            }, "ctx"_a, pydsdoc::methodsDoc::nvds_obj_enc_destroy_context);
+     }
 }

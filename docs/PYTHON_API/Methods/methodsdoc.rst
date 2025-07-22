@@ -1,8 +1,26 @@
+=============================
+configure_source_for_ntp_sync
+=============================
+
+.. autofunction:: pyds.configure_source_for_ntp_sync
+
+======================
+alloc_custom_struct
+======================
+
+.. autofunction:: pyds.alloc_custom_struct
+
 ======================
 gst_element_send_nvevent_new_stream_reset
 ======================
 
 .. autofunction:: pyds.gst_element_send_nvevent_new_stream_reset
+
+======================
+gst_element_send_nvevent_interval_update
+======================
+
+.. autofunction:: pyds.gst_element_send_nvevent_interval_update
 
 ======================
 get_segmentation_masks
@@ -21,6 +39,18 @@ get_nvds_buf_surface
 ==============
 
 .. autofunction:: pyds.get_nvds_buf_surface
+
+==============
+get_nvds_buf_surface_gpu
+==============
+
+.. autofunction:: pyds.get_nvds_buf_surface_gpu
+
+==============
+unmap_nvds_buf_surface
+==============
+
+.. autofunction:: pyds.unmap_nvds_buf_surface
 
 ==============
 nvds_acquire_meta_lock
@@ -386,4 +416,32 @@ NvBufSurfaceMapEglImage
 
 .. autofunction:: pyds.NvBufSurfaceMapEglImage
 
+=============================
+nvds_measure_buffer_latency
+=============================
 
+.. autofunction:: pyds.nvds_measure_buffer_latency
+
+=============================
+nvds_obj_enc_create_context
+=============================
+
+.. autofunction:: pyds.nvds_obj_enc_create_context
+
+=============================
+nvds_obj_enc_process
+=============================
+
+.. autofunction:: pyds.nvds_obj_enc_process
+
+=============================
+nvds_obj_enc_finish
+=============================
+
+.. autofunction:: pyds.nvds_obj_enc_finish
+
+=============================
+nvds_obj_enc_destroy_context
+=============================
+
+.. autofunction:: pyds.nvds_obj_enc_destroy_context

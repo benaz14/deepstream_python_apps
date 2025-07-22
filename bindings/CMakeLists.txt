@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,12 +22,14 @@ function(check_variable_set variable_name default_value)
         endif()
 endfunction()
 
-check_variable_set(DS_VERSION 6.1)
 check_variable_set(PYTHON_MAJOR_VERSION 3)
-check_variable_set(PYTHON_MINOR_VERSION 8)
-check_variable_set(PIP_PLATFORM linux_x86_64)
-check_variable_set(DS_PATH "/opt/nvidia/deepstream/deepstream-${DS_VERSION}")
+check_variable_set(PYTHON_MINOR_VERSION 10)
 
+check_variable_set(DS_PATH "/opt/nvidia/deepstream/deepstream")
+if (DEFINED IS_SBSA)
+	message("IS_SBSA is set. Enabling definitions for ARM_SBSA")
+	add_compile_definitions(IS_SBSA)
+endif()
 
 # Checking values are allowed
 macro(check_variable_allowed var_name var_list)
@@ -37,10 +39,8 @@ macro(check_variable_allowed var_name var_list)
 endmacro()
 set(PYTHON_MAJVERS_ALLOWED 3)
 check_variable_allowed(PYTHON_MAJOR_VERSION PYTHON_MAJVERS_ALLOWED)
-set(PYTHON_MINVERS_ALLOWED 6 8)
+set(PYTHON_MINVERS_ALLOWED 10)
 check_variable_allowed(PYTHON_MINOR_VERSION PYTHON_MINVERS_ALLOWED)
-set(PIP_PLATFORM_ALLOWED linux_x86_64 linux_aarch64)
-check_variable_allowed(PIP_PLATFORM PIP_PLATFORM_ALLOWED)
 
 # Setting C++ values
 set(CMAKE_CXX_STANDARD 17)
@@ -50,7 +50,7 @@ set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined")
 
 # Setting python build versions
 set(PYTHON_VERSION ${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION})
-set(PIP_WHEEL pyds-1.1.4-py3-none-${PIP_PLATFORM}.whl)
+set(PIP_WHEEL pyds-1.1.11-py3-none-${PIP_PLATFORM}.whl)
 
 # Describing pyds build
 project(pyds DESCRIPTION "Python bindings for Deepstream")
@@ -61,8 +61,8 @@ include_directories(
         ${DS_PATH}/sources/includes/
         include/bind
         include/nvds
-        ../3rdparty/pybind11/include/pybind11/
-        ../3rdparty/pybind11/include/
+        3rdparty/pybind11/include/pybind11/
+        3rdparty/pybind11/include/
         /usr/include/python${PYTHON_VERSION}
         /usr/include/gstreamer-1.0
         /usr/include/glib-2.0
@@ -74,15 +74,12 @@ add_library(pyds SHARED src/pyds.cpp src/utils.cpp src/bindanalyticsmeta.cpp
             src/bindfunctions.cpp src/bindgstnvdsmeta.cpp
             src/bindmeta360.cpp src/bindnvbufsurface.cpp src/bindnvdsinfer.cpp
             src/bindnvdsmeta.cpp src/bindnvosd.cpp src/bindopticalflow.cpp
-            src/bindschema.cpp src/bindtrackermeta.cpp)
+            src/bindschema.cpp src/bindtrackermeta.cpp src/custom_binding/bindcustom.cpp)
 
 set_target_properties(pyds PROPERTIES PREFIX "")
 set_target_properties(pyds PROPERTIES OUTPUT_NAME "pyds")
 
 set(PYTHON_LIB python${PYTHON_VERSION})
-if(${PYTHON_MINOR_VERSION} EQUAL 6)
-        set(PYTHON_LIB python${PYTHON_VERSION}m)
-endif()
 
 target_link_libraries(pyds pthread dl ${PYTHON_LIB} gstreamer-1.0 glib-2.0)
 
@@ -99,17 +96,6 @@ function(add_ds_lib libname)
         target_link_libraries(pyds ${libname})
 endfunction()
 
-foreach(nvds_lib nvds_osd nvds_meta nvds_infer nvdsgst_meta nvbufsurface nvbufsurftransform nvdsgst_helper)
+foreach(nvds_lib nvds_osd nvds_meta nvds_infer nvdsgst_meta nvbufsurface nvbufsurftransform nvdsgst_helper nvdsgst_customhelper nvds_batch_jpegenc)
         add_ds_lib(${nvds_lib})
 endforeach()
-
-# Pip wheel build
-add_custom_command(
-        OUTPUT ${PIP_WHEEL}
-        DEPENDS pyds
-        COMMAND python${PYTHON_VERSION} ${CMAKE_SOURCE_DIR}/packaging/setup.py bdist_wheel --plat-name ${PIP_PLATFORM}
-        COMMAND mv -f dist/${PIP_WHEEL} ${PIP_WHEEL}
-        COMMAND rmdir dist
-)
-
-add_custom_target(pip_wheel ALL DEPENDS ${PIP_WHEEL})

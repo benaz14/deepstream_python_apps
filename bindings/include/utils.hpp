@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,7 +34,6 @@
 #include <mutex>
 #include <pybind11/cast.h>
 #include <pybind11.h>
-#include "../docstrings/pydocumentation.h"
 
 namespace py = pybind11;
 
@@ -44,6 +43,9 @@ namespace pydeepstream {
     pybind11::arg operator ""_a(const char *str, size_t len);
 }
 
+namespace pydeepstream {
+    void bindutils(py::module &m);
+}
 
 namespace pydeepstream::utils {
 

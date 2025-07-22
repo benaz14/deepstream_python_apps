@@ -1,5 +1,5 @@
 ################################################################################
-# SPDX-FileCopyrightText: Copyright (c) 2019-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2019-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,10 +16,10 @@
 ################################################################################
 
 Prerequisites:
-- DeepStreamSDK 6.1.1
-- Python 3.8
+- DeepStreamSDK 7.0 **NOT SUPPORTED BY 7.1**
+- Python 3.10
 - Gst-python
-- NumPy package
+- NumPy package <2.0, >=1.22 (2.0 and above not supported)
 - OpenCV package
 
 To install required packages:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2021-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +19,7 @@
 import sys
 sys.path.append("../")
 from common.bus_call import bus_call
-from common.is_aarch_64 import is_aarch64
+from common.platform_info import PlatformInfo
 import pyds
 import platform
 import math
@@ -30,6 +30,7 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GstRtspServer", "1.0")
 from gi.repository import Gst, GstRtspServer, GLib
 import configparser
+import datetime
 
 import argparse
 
@@ -40,7 +41,7 @@ PGIE_CLASS_ID_PERSON = 2
 PGIE_CLASS_ID_ROADSIGN = 3
 MUXER_OUTPUT_WIDTH = 1920
 MUXER_OUTPUT_HEIGHT = 1080
-MUXER_BATCH_TIMEOUT_USEC = 4000000
+MUXER_BATCH_TIMEOUT_USEC = 33000
 TILED_OUTPUT_WIDTH = 1280
 TILED_OUTPUT_HEIGHT = 720
 GST_CAPS_FEATURES_NVMM = "memory:NVMM"
@@ -48,11 +49,11 @@ OSD_PROCESS_MODE = 0
 OSD_DISPLAY_TEXT = 0
 pgie_classes_str = ["Vehicle", "TwoWheeler", "Person", "RoadSign"]
 
-# tiler_sink_pad_buffer_probe  will extract metadata received on OSD sink pad
+# pgie_src_pad_buffer_probe  will extract metadata received on OSD sink pad
 # and update params for drawing rectangle, object information etc.
 
 
-def tiler_src_pad_buffer_probe(pad, info, u_data):
+def pgie_src_pad_buffer_probe(pad, info, u_data):
     frame_number = 0
     num_rects = 0
     gst_buffer = info.get_buffer()
@@ -77,36 +78,13 @@ def tiler_src_pad_buffer_probe(pad, info, u_data):
             break
 
         frame_number = frame_meta.frame_num
-        l_obj = frame_meta.obj_meta_list
-        num_rects = frame_meta.num_obj_meta
-        obj_counter = {
-            PGIE_CLASS_ID_VEHICLE: 0,
-            PGIE_CLASS_ID_PERSON: 0,
-            PGIE_CLASS_ID_BICYCLE: 0,
-            PGIE_CLASS_ID_ROADSIGN: 0,
-        }
-        while l_obj is not None:
-            try:
-                # Casting l_obj.data to pyds.NvDsObjectMeta
-                obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
-            except StopIteration:
-                break
-            obj_counter[obj_meta.class_id] += 1
-            try:
-                l_obj = l_obj.next
-            except StopIteration:
-                break
-
         print(
             "Frame Number=",
-            frame_number,
-            "Number of Objects=",
-            num_rects,
-            "Vehicle_count=",
-            obj_counter[PGIE_CLASS_ID_VEHICLE],
-            "Person_count=",
-            obj_counter[PGIE_CLASS_ID_PERSON],
+            frame_number
         )
+        if ts_from_rtsp:
+            ts = frame_meta.ntp_timestamp/1000000000 # Retrieve timestamp, put decimal in proper position for Unix format
+            print("RTSP Timestamp:",datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')) # Convert timestamp to UTC
 
         try:
             l_frame = l_frame.next
@@ -148,6 +126,10 @@ def decodebin_child_added(child_proxy, Object, name, user_data):
     print("Decodebin child added:", name, "\n")
     if name.find("decodebin") != -1:
         Object.connect("child-added", decodebin_child_added, user_data)
+
+    if ts_from_rtsp:
+        if name.find("source") != -1:
+            pyds.configure_source_for_ntp_sync(hash(Object))
 
 
 def create_source_bin(index, uri):
@@ -193,6 +175,7 @@ def main(args):
     # Check input arguments
     number_sources = len(args)
 
+    platform_info = PlatformInfo()
     # Standard GStreamer initialization
     Gst.init(None)
 
@@ -222,7 +205,7 @@ def main(args):
             sys.stderr.write("Unable to create source bin \n")
         pipeline.add(source_bin)
         padname = "sink_%u" % i
-        sinkpad = streammux.get_request_pad(padname)
+        sinkpad = streammux.request_pad_simple(padname)
         if not sinkpad:
             sys.stderr.write("Unable to create sink pad bin \n")
         srcpad = source_bin.get_static_pad("src")
@@ -270,7 +253,7 @@ def main(args):
     if not encoder:
         sys.stderr.write(" Unable to create encoder")
     encoder.set_property("bitrate", bitrate)
-    if is_aarch64():
+    if platform_info.is_integrated_gpu():
         encoder.set_property("preset-level", 1)
         encoder.set_property("insert-sps-pps", 1)
         #encoder.set_property("bufapi-version", 1)
@@ -298,8 +281,11 @@ def main(args):
 
     streammux.set_property("width", 1920)
     streammux.set_property("height", 1080)
-    streammux.set_property("batch-size", 1)
-    streammux.set_property("batched-push-timeout", 4000000)
+    streammux.set_property("batch-size", number_sources)
+    streammux.set_property("batched-push-timeout", MUXER_BATCH_TIMEOUT_USEC)
+    
+    if ts_from_rtsp:
+        streammux.set_property("attach-sys-ts", 0)
 
     if gie=="nvinfer":
         pgie.set_property("config-file-path", "dstest1_pgie_config.txt")
@@ -353,6 +339,12 @@ def main(args):
     bus.add_signal_watch()
     bus.connect("message", bus_call, loop)
 
+    pgie_src_pad=pgie.get_static_pad("src")
+    if not pgie_src_pad:
+        sys.stderr.write(" Unable to get src pad \n")
+    else:
+        pgie_src_pad.add_probe(Gst.PadProbeType.BUFFER, pgie_src_pad_buffer_probe, 0)
+
     # Start streaming
     rtsp_port_num = 8554
 
@@ -394,6 +386,8 @@ def parse_args():
                   help="RTSP Streaming Codec H264/H265 , default=H264", choices=['H264','H265'])
     parser.add_argument("-b", "--bitrate", default=4000000,
                   help="Set the encoding bitrate ", type=int)
+    parser.add_argument("--rtsp-ts", action="store_true", default=False, dest='rtsp_ts', help="Attach NTP timestamp from RTSP source",
+    )
     # Check input arguments
     if len(sys.argv)==1:
         parser.print_help(sys.stderr)
@@ -403,10 +397,12 @@ def parse_args():
     global bitrate
     global stream_path
     global gie
+    global ts_from_rtsp
     gie = args.gie
     codec = args.codec
     bitrate = args.bitrate
     stream_path = args.input
+    ts_from_rtsp = args.rtsp_ts
     return stream_path
 
 if __name__ == '__main__':

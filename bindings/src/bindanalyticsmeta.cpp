@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,6 +34,7 @@ namespace pydeepstream {
                 .def_readwrite("ocStatus", &NvDsAnalyticsObjInfo::ocStatus)
                 .def_readwrite("lcStatus", &NvDsAnalyticsObjInfo::lcStatus)
                 .def_readwrite("dirStatus", &NvDsAnalyticsObjInfo::dirStatus)
+                .def_readwrite("objStatus", &NvDsAnalyticsObjInfo::objStatus)
                 .def_readwrite("unique_id", &NvDsAnalyticsObjInfo::unique_id)
 
                 .def_static("cast",
